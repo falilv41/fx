@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USD/JPY AI Predictor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .card {
+            background-color: #1e1e1e;
+            border: 1px solid #333;
+        }
+
+        .btn-predict {
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+            border: none;
+            color: white;
+            font-weight: bold;
+            padding: 10px 30px;
+        }
+
+        .btn-predict:hover {
+            opacity: 0.9;
+        }
+
+        .pred-up {
+            color: #00E676;
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .pred-down {
+            color: #FF1744;
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .pred-wait {
+            color: #B0BEC5;
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        #chart-container {
+            height: 500px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container mt-4">
+        <header class="d-flex justify-content-between align-items-center mb-4">
+            <h1>USD/JPY AI Predictor</h1>
+            <div id="current-price" class="fs-3 fw-bold text-info">Loading...</div>
+        </header>
+
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">Last 24 Hours</div>
+                    <div class="card-body p-0">
+                        <div id="chart-container"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center h-100">
+                    <div class="card-body d-flex flex-column justify-content-center align-items-center">
+                        <h3 class="card-title mb-4">Next 1 Hour Prediction</h3>
+
+                        <div id="prediction-result" class="mb-4">
+                            <div class="text-muted">Ready to predict</div>
+                        </div>
+
+                        <button id="btn-predict" class="btn btn-predict rounded-pill shadow-lg">
+                            PREDICT NOW
+                        </button>
+
+                        <div id="pred-details" class="mt-4 text-start w-100 px-4" style="display:none;">
+                            <hr class="border-secondary">
+                            <p class="mb-1">Probability (Up): <span id="prob-val" class="float-end"></span></p>
+                            <p class="mb-1">Confidence: <span id="conf-val" class="float-end"></span></p>
+                            <p class="mb-0 text-muted small">Based on data at: <span id="data-time"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Model Performance Analysis</span>
+                        <button id="btn-analyze" class="btn btn-sm btn-outline-info">Analyze Past 3 Months</button>
+                    </div>
+                    <div class="card-body" id="perf-content" style="display:none;">
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <div class="d-flex gap-3 align-items-center">
+                                    <label class="text-muted">Filter by Date:</label>
+                                    <input type="date" id="date-start" class="form-control form-control-sm"
+                                        style="width: 180px;">
+                                    <span class="text-muted">to</span>
+                                    <input type="date" id="date-end" class="form-control form-control-sm"
+                                        style="width: 180px;">
+                                    <button id="btn-filter-date" class="btn btn-sm btn-info">Apply Filter</button>
+                                    <button id="btn-reset-date" class="btn btn-sm btn-outline-secondary">Reset</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mb-4 text-center">
+                            <div class="col-md-3">
+                                <div class="p-3 border border-secondary rounded">
+                                    <div class="text-muted small">Win Rate</div>
+                                    <div id="metric-win-rate" class="fs-4 fw-bold text-warning">--%</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="p-3 border border-secondary rounded">
+                                    <div class="text-muted small">Total Return</div>
+                                    <div id="metric-return" class="fs-4 fw-bold text-success">--%</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="p-3 border border-secondary rounded">
+                                    <div class="text-muted small">Trades</div>
+                                    <div id="metric-trades" class="fs-4 fw-bold">--</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="p-3 border border-secondary rounded">
+                                    <div class="text-muted small">Final Capital</div>
+                                    <div id="metric-capital" class="fs-4 fw-bold text-info">--</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="perf-chart" style="height: 500px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Fetch and display chart
+        async function loadChart() {
+            try {
+                const response = await fetch('/api/market_data');
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    const data = result.data;
+                    document.getElementById('current-price').innerText = `¥${result.current_price.toFixed(3)}`;
+
+                    const trace = {
+                        x: data.map(d => d.time),
+                        close: data.map(d => d.close),
+                        high: data.map(d => d.high),
+                        low: data.map(d => d.low),
+                        open: data.map(d => d.open),
+                        type: 'candlestick',
+                        xaxis: 'x',
+                        yaxis: 'y',
+                        increasing: { line: { color: '#00E676' } },
+                        decreasing: { line: { color: '#FF1744' } }
+                    };
+
+                    const layout = {
+                        dragmode: 'zoom',
+                        showlegend: false,
+                        xaxis: {
+                            rangeslider: { visible: false },
+                            gridcolor: '#333'
+                        },
+                        yaxis: {
+                            gridcolor: '#333',
+                            tickformat: '.2f'
+                        },
+                        paper_bgcolor: '#1e1e1e',
+                        plot_bgcolor: '#1e1e1e',
+                        font: { color: '#e0e0e0' },
+                        margin: { r: 50, t: 30, b: 30, l: 50 }
+                    };
+
+                    Plotly.newPlot('chart-container', [trace], layout);
+                }
+            } catch (error) {
+                console.error('Error loading chart:', error);
+            }
+        }
+
+        // Predict button handler
+        document.getElementById('btn-predict').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-predict');
+            const resultDiv = document.getElementById('prediction-result');
+            const detailsDiv = document.getElementById('pred-details');
+
+            btn.disabled = true;
+            btn.innerText = 'Analyzing...';
+            resultDiv.innerHTML = '<div class="spinner-border text-primary" role="status"></div>';
+            detailsDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/predict');
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    let colorClass = 'pred-wait';
+                    let icon = '➖';
+
+                    if (result.prediction === 'UP') {
+                        colorClass = 'pred-up';
+                        icon = '▲';
+                    } else if (result.prediction === 'DOWN') {
+                        colorClass = 'pred-down';
+                        icon = '▼';
+                    }
+
+                    resultDiv.innerHTML = `
+                        <div class="${colorClass}">
+                            ${icon} ${result.prediction}
+                        </div>
+                    `;
+
+                    document.getElementById('prob-val').innerText = (result.probability * 100).toFixed(1) + '%';
+                    document.getElementById('conf-val').innerText = result.confidence_display;
+                    document.getElementById('data-time').innerText = result.timestamp;
+                    detailsDiv.style.display = 'block';
+                } else {
+                    resultDiv.innerHTML = `<div class="text-danger">Error: ${result.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="text-danger">Connection Error</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'PREDICT NOW';
+            }
+        });
+
+        // Initial load
+        loadChart();
+        // Refresh chart every minute
+        setInterval(loadChart, 60000);
+
+        // Performance Analysis
+        let fullChartData = [];
+        let fullTrades = [];
+
+        function renderPerformanceChart(chartData, trades, dateRange = null) {
+            const data = chartData;
+
+            const trace1 = {
+                x: data.map(d => d.time),
+                close: data.map(d => d.close),
+                high: data.map(d => d.high),
+                low: data.map(d => d.low),
+                open: data.map(d => d.open),
+                type: 'candlestick',
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: { line: { color: '#00E676' } },
+                decreasing: { line: { color: '#FF1744' } },
+                name: 'Price'
+            };
+
+            // Create markers for trades
+            const tradeMarkers = {
+                x: [],
+                y: [],
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    symbol: [],
+                    color: [],
+                    size: 10
+                },
+                text: [],
+                name: 'Trades'
+            };
+
+            trades.forEach(t => {
+                tradeMarkers.x.push(t.time);
+                tradeMarkers.y.push(t.price);
+
+                let symbol = 'circle';
+                let color = 'gray';
+
+                if (t.action === 'LONG') {
+                    symbol = 'triangle-up';
+                    color = t.result === 'WIN' ? '#00E676' : '#FF1744';
+                } else {
+                    symbol = 'triangle-down';
+                    color = t.result === 'WIN' ? '#00E676' : '#FF1744';
+                }
+
+                tradeMarkers.marker.symbol.push(symbol);
+                tradeMarkers.marker.color.push(color);
+                tradeMarkers.text.push(`${t.action} (${t.result})<br>Profit: ¥${t.profit.toFixed(0)}`);
+            });
+
+            const layout = {
+                dragmode: 'zoom',
+                showlegend: true,
+                xaxis: {
+                    rangeslider: { visible: false },
+                    gridcolor: '#333'
+                },
+                yaxis: {
+                    gridcolor: '#333',
+                    tickformat: '.2f'
+                },
+                paper_bgcolor: '#1e1e1e',
+                plot_bgcolor: '#1e1e1e',
+                font: { color: '#e0e0e0' },
+                margin: { r: 50, t: 30, b: 30, l: 50 }
+            };
+
+            // If date range is specified, zoom to that range
+            if (dateRange) {
+                layout.xaxis.range = [dateRange.start, dateRange.end];
+            }
+
+            Plotly.newPlot('perf-chart', [trace1, tradeMarkers], layout);
+        }
+
+        function filterDataByDateRange(startDate, endDate) {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59); // Include the entire end date
+
+            const filteredData = fullChartData.filter(d => {
+                const date = new Date(d.time);
+                return date >= start && date <= end;
+            });
+
+            const filteredTrades = fullTrades.filter(t => {
+                const date = new Date(t.time);
+                return date >= start && date <= end;
+            });
+
+            // Recalculate metrics for filtered period
+            const wins = filteredTrades.filter(t => t.result === 'WIN').length;
+            const winRate = filteredTrades.length > 0 ? (wins / filteredTrades.length * 100) : 0;
+
+            let capital = 1000000;
+            filteredTrades.forEach(t => {
+                capital += t.profit;
+            });
+            const totalReturn = ((capital - 1000000) / 1000000) * 100;
+
+            // Update metrics display
+            document.getElementById('metric-win-rate').innerText = `${winRate.toFixed(2)}%`;
+            document.getElementById('metric-return').innerText = `${totalReturn.toFixed(2)}%`;
+            document.getElementById('metric-trades').innerText = filteredTrades.length;
+            document.getElementById('metric-capital').innerText = `¥${capital.toFixed(0)}`;
+
+            return { data: filteredData, trades: filteredTrades };
+        }
+
+        document.getElementById('btn-analyze').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-analyze');
+            const perfContent = document.getElementById('perf-content');
+
+            btn.disabled = true;
+            btn.innerText = 'Analyzing (this may take a few seconds)...';
+
+            try {
+                const response = await fetch('/api/performance');
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    // Store full data
+                    fullChartData = result.chart_data;
+                    fullTrades = result.trades;
+
+                    // Update Metrics
+                    document.getElementById('metric-win-rate').innerText = result.metrics.win_rate;
+                    document.getElementById('metric-return').innerText = result.metrics.total_return;
+                    document.getElementById('metric-trades').innerText = result.metrics.total_trades;
+                    document.getElementById('metric-capital').innerText = result.metrics.final_capital;
+
+                    // Set default date range (full range)
+                    if (fullChartData.length > 0) {
+                        const firstDate = new Date(fullChartData[0].time);
+                        const lastDate = new Date(fullChartData[fullChartData.length - 1].time);
+
+                        document.getElementById('date-start').value = firstDate.toISOString().split('T')[0];
+                        document.getElementById('date-end').value = lastDate.toISOString().split('T')[0];
+                    }
+
+                    // Render chart
+                    renderPerformanceChart(fullChartData, fullTrades);
+                    perfContent.style.display = 'block';
+
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Error fetching performance data');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Analyze Past 3 Months';
+            }
+        });
+
+        // Date filter handlers
+        document.getElementById('btn-filter-date').addEventListener('click', () => {
+            const startDate = document.getElementById('date-start').value;
+            const endDate = document.getElementById('date-end').value;
+
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates');
+                return;
+            }
+
+            const filtered = filterDataByDateRange(startDate, endDate);
+
+            if (filtered.data.length === 0) {
+                alert('No data found in the selected date range');
+                return;
+            }
+
+            // Render with zoom
+            renderPerformanceChart(filtered.data, filtered.trades, {
+                start: startDate,
+                end: endDate
+            });
+        });
+
+        document.getElementById('btn-reset-date').addEventListener('click', () => {
+            if (fullChartData.length > 0) {
+                const firstDate = new Date(fullChartData[0].time);
+                const lastDate = new Date(fullChartData[fullChartData.length - 1].time);
+
+                document.getElementById('date-start').value = firstDate.toISOString().split('T')[0];
+                document.getElementById('date-end').value = lastDate.toISOString().split('T')[0];
+
+                // Reset metrics to full range
+                document.getElementById('metric-win-rate').innerText = (fullTrades.filter(t => t.result === 'WIN').length / fullTrades.length * 100).toFixed(2) + '%';
+
+                let capital = 1000000;
+                fullTrades.forEach(t => capital += t.profit);
+                const totalReturn = ((capital - 1000000) / 1000000) * 100;
+
+                document.getElementById('metric-return').innerText = totalReturn.toFixed(2) + '%';
+                document.getElementById('metric-trades').innerText = fullTrades.length;
+                document.getElementById('metric-capital').innerText = `¥${capital.toFixed(0)}`;
+
+                // Render full chart
+                renderPerformanceChart(fullChartData, fullTrades);
+            }
+        });
+    </script>
+</body>
+
+</html>
