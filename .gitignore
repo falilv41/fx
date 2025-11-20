@@ -39,5 +39,7 @@ Thumbs.db
 
 # Project specific
 *.pkl
+!model_lgb.pkl
 *.csv
 !data/USDJPY_1h.csv
+
